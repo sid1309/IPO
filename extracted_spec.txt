@@ -1,0 +1,589 @@
+IPO Prospectus Analyst: Technical Specification
+Two phases: Phase 1 is a RAG system that answers questions from IPO prospectuses (DRHP/RHP) with page-level citations. Phase 2 turns it into an agent that uses tools for valuation maths, market context and an estimated listing-price range.
+Scope and compliance: this is an educational, document-research project. It reports what filings say and gives clearly labelled statistical estimates. It must never say "apply", "avoid", "buy" or "sell". Giving investment recommendations in India may require SEBI registration, so check the current rules, keep the project non-commercial, and show a disclaimer in the UI and API responses.
+1. Overview
+Phase 1: RAG
+Phase 2: Agent
+Goal
+Answer questions about one IPO from its prospectus, with exact citations.
+Combine document answers with computed valuation, market data and a historical-pattern estimate of the listing price range.
+Sample question
+"How will the IPO money be used?"
+"At the upper band, what is the implied P/E, and what listing range did similar IPOs see?"
+Main skills shown
+Parsing, chunking, hybrid search, reranking, evals, FastAPI, Docker
+Tool calling, routing, guardrails, ML backtesting, tracing, cost control
+Graph layer
+GraphRAG on Neo4j for entity and relationship questions (core component)
+Graph tools available to the agent; optional MCP server exposing the tools
+Duration
+About 3 weeks (includes the graph layer)
+About 3 weeks
+2. Phase 1: RAG on IPO Prospectuses
+2.1 Goal and question set
+The user selects an IPO and asks questions in plain English. Every answer must cite the document, section and page. If the document does not contain the answer, the system says so.
+Use of proceeds (the core use case):
+How will the money raised in this IPO be used? Show each object with its amount.
+How much is the fresh issue (goes to the company) and how much is the offer for sale (goes to selling shareholders)?
+How much is allocated to debt repayment, and which borrowings are being repaid?
+How much is for working capital, capital expenditure, acquisitions and general corporate purposes?
+What is the year-wise schedule of deployment, and is a monitoring agency appointed?
+Is any part of the objects already funded through bridge financing or internal accruals?
+Issue structure:
+Price band, lot size, minimum investment and issue size.
+Reservation split between QIB, non-institutional and retail investors.
+Who are the selling shareholders, and how many shares is each selling?
+Promoter holding before and after the issue.
+Lead managers, registrar and listing exchanges.
+Business, financials, risk and legal:
+Revenue, EBITDA and profit for the last three years, and how they changed.
+Debt levels, contingent liabilities, customer and supplier concentration.
+Top company-specific risk factors (not generic boilerplate).
+Pending litigation against the company, promoters and directors, with counts and amounts.
+Related-party transactions and their size.
+How does the prospectus justify the issue price (basis for offer price, KPIs, peer comparison)?
+What changed between the DRHP and the RHP?
+2.2 Architecture (request flow)
+Figure 1: Ingestion builds the vector index and the knowledge graph; the router chooses vector, graph or tools at query time.
+Ingest: parse text and tables, detect sections, chunk, embed into Qdrant, and extract entities and relations into Neo4j.
+Guard and cache: FastAPI validates input, checks the cache and applies advice-refusal rules.
+Route: classify the question as document lookup, relationship (graph) question, comparison, or (Phase 2) tool-based; rewrite follow-ups.
+Retrieve: hybrid search (dense + sparse) with ipo_id filter, then cross-encoder rerank; for relationship questions run a graph query or a graph-augmented traversal and fetch the linked chunks.
+Generate: LLM answers only from the retrieved context with inline citations (section, page).
+Verify: groundedness check and numeric check (every number must appear in a cited chunk).
+Respond: JSON with answer, citations, chart data where relevant, and disclaimer.
+2.3 Free-tier and open-source stack
+Goal: build and demo the whole project at zero cost. Free tiers change often, so treat the numbers below as a snapshot (early October 2026) and confirm them in each provider's console before you depend on them.
+LLMs (free tier)
+Role
+Primary (free)
+Fallback
+Why
+Answer generation
+Gemini Flash-class model via Google AI Studio free tier
+Groq or OpenRouter free models; Ollama local model
+Long context, good structured output and tool calling, no card needed.
+Router / classifier
+Gemini Flash-Lite-class model
+Small local model via Ollama
+Cheap, fast calls that save quota for answers.
+Graph extraction
+Gemini Flash with JSON schema output
+Local Qwen or Llama via Ollama (no quota)
+High call volume offline; local fallback avoids daily limits.
+Agent planner (Phase 2)
+Gemini Flash with function calling
+Groq-hosted Llama-class model
+Reliable tool calling; keep steps few to save quota.
+Eval judge
+A different model family from the generator (for example a Llama-class model on Groq)
+Gemini Flash
+Reduces self-preference bias in LLM-as-judge scoring.
+Gemini free tier facts to remember: Pro models were removed from the free tier in 2026, so use Flash and Flash-Lite models. Google does not print fixed free-tier limits in its docs; the real RPM, TPM and RPD for your project appear in AI Studio, and third-party snapshots range from roughly 5 to 30 requests per minute and hundreds to about 1,500 requests per day depending on model. Free-tier prompts may be used to improve Google products, so send only public documents (prospectuses are public) and never personal data.
+Provider wrapper: write one LLMClient interface with adapters for Gemini, Groq, OpenRouter and Ollama. Configure the model per role in a YAML file, retry with exponential backoff on 429 errors, fall back to the next provider, and cache every response keyed by prompt hash.
+Quota planning: extract the graph only from the relevant sections (promoters, management, group companies, litigation, related-party transactions, objects of the issue, capital structure), run extraction as a background job, and cache results. Use a local model for bulk extraction if you hit daily limits.
+Embedding models (open source, self-hosted)
+Model
+Specs and licence
+Why use it here
+Watch out for
+BAAI/bge-m3 (default)
+568M parameters, 1024-d, 8,192-token context, MIT
+One model gives dense, sparse and multi-vector outputs, which suits hybrid search; long context fits big table chunks; multilingual if you later add Hindi documents.
+Mid-pack English leaderboard scores; heavier on CPU than small models.
+Qwen3-Embedding-0.6B (quality upgrade)
+0.6B, up to 1024-d, 32K context, Apache 2.0
+Reported as the best default open model family in late September 2026; instruction-aware queries; has matching reranker models, so retrieval and reranking can come from one family.
+Queries need the right instruction prefix; larger 4B and 8B variants need a GPU.
+EmbeddingGemma-300M (light baseline)
+300M, 768-d (smaller via truncation), 2K context, Gemma terms
+Fast and small for laptops and CPU-only machines.
+Only 2K context, so keep chunks short; check the licence terms.
+Gemini Embedding (hosted comparison)
+Hosted API, free-tier eligible
+No local compute; useful as a comparison point.
+Quota limits, data leaves your machine, vendor lock-in.
+Recommendation: start with bge-m3, then run a small bake-off on your own 50-question eval set (bge-m3 vs Qwen3-Embedding-0.6B vs EmbeddingGemma vs Gemini Embedding) and report recall@5, MRR and speed. Choose by your numbers, not by leaderboards, because finance text is full of figures and clause names that embeddings handle poorly.
+Rules: use the same model for documents and queries, apply the model's required query/document prefixes, normalise vectors, and store the model name and version in metadata. If you change models, re-embed the whole corpus.
+Reranker: BAAI/bge-reranker-v2-m3 (open, pairs with bge-m3) or Qwen3-Reranker-0.6B. Rerank the top 20 to 30 candidates; on a CPU this adds latency, so measure it.
+Databases
+Store
+Choice
+Free option
+Why
+Vector + keyword
+Qdrant
+Docker locally, or Qdrant Cloud free cluster (about 1 GB)
+Native dense and sparse vectors for hybrid search, plus payload filters on ipo_id, section and doc_type. A few prospectuses fit easily in the free size.
+Graph
+Neo4j
+Neo4j Community in Docker, or AuraDB Free (one database; the console shows the node and relationship caps, documented as 200K nodes / 400K relationships, with some pages still listing 50K / 175K, so verify)
+Mature graph database with Cypher, a visual browser for demos, and a Python driver. One prospectus produces only thousands of nodes.
+Relational
+PostgreSQL (SQLite for early development)
+Free tiers from managed providers such as Neon or Supabase, or Docker locally
+IPO records, document versions, the past-IPOs table, eval runs and query logs.
+Cache / queue
+Redis
+Docker locally; small hosted free tiers exist
+Answer cache, rate limiting and ingestion jobs.
+Two setups: Option A is everything in Docker Compose on your laptop (best for development and for recording a demo video). Option B is free cloud services (Qdrant Cloud, AuraDB Free, a managed Postgres, Gemini free tier) so recruiters can open a live link.
+AuraDB Free behaviour: an instance with no write queries for 3 days is paused and a paused instance is deleted after 30 days. Schedule a tiny heartbeat write (for example a GitHub Actions cron job every 2 days) and keep an export of your graph in the repo.
+Free tiers are for demos, not production: expect cold starts, caps and policy changes. Keep configuration in environment variables so you can swap providers quickly.
+Rest of the stack
+Layer
+Choice
+Why / notes
+API
+FastAPI + Pydantic + Uvicorn
+Async, typed models, automatic OpenAPI docs. Use background tasks (or RQ/Celery with Redis) for ingestion and graph extraction.
+PDF parsing
+PyMuPDF for text, pdfplumber or Camelot for tables, Tesseract OCR for scanned pages
+Prospectuses are long with complex tables. Test parsers on your own PDFs; Docling or unstructured are alternatives to compare.
+Chunking
+Structure-aware, parent-child, tables as separate chunks
+Split on section headings; keep each table with its caption; store a short text summary of each table for retrieval and the full table for answering.
+Entity resolution
+rapidfuzz plus an LLM tie-break
+Merges name variants such as "XYZ Pvt Ltd" and "XYZ Private Limited".
+Evaluation
+Custom scripts + Ragas
+Retrieval metrics, faithfulness, numeric accuracy, refusal accuracy, multi-hop accuracy.
+Charts
+Plotly (Streamlit) or Recharts (React); matplotlib for README images
+See the visual outputs section.
+Observability
+Langfuse (or OpenTelemetry)
+Trace prompts, retrieved chunks, graph queries, latency, token usage.
+UI
+Streamlit first, React later if time allows
+Source panel showing the cited page next to each answer.
+Packaging
+Docker + docker-compose
+Services: api, qdrant, neo4j, postgres, redis, ui.
+2.4 Chunk metadata schema
+Field
+Description
+ipo_id
+Unique ID of the IPO (used as a mandatory filter on every query).
+company_name
+Issuer name.
+doc_type
+DRHP, RHP or Prospectus.
+doc_version
+Date or filing version, so DRHP and RHP can be compared.
+section
+Normalised section name, e.g. risk_factors, objects_of_issue, capital_structure, basis_for_price, financial_information, legal_proceedings.
+page_start, page_end
+Pages for citations.
+chunk_type
+text, table or table_summary.
+parent_id
+Links a small chunk to its parent section chunk.
+text, embedding
+Chunk content and its vector.
+Section names differ slightly between prospectuses, so check headings in your own PDFs and build the section detector from those rather than assuming a fixed list.
+2.5 Structured extraction (summary card)
+Besides free-form Q&A, extract a typed summary with evidence for each field. Use the LLM with a JSON schema, validate with Pydantic, then verify each value against the source text.
+class ObjectOfIssue(BaseModel):
+    name: str                  # e.g. "Repayment of borrowings"
+    amount_inr_crore: float
+    evidence_page: int
+ 
+class IPOSummary(BaseModel):
+    ipo_id: str
+    fresh_issue_crore: float | None
+    offer_for_sale_crore: float | None
+    price_band_low: float | None
+    price_band_high: float | None
+    lot_size: int | None
+    objects: list[ObjectOfIssue]
+    promoter_holding_pre_pct: float | None
+    promoter_holding_post_pct: float | None
+    lead_managers: list[str]
+    registrar: str | None
+    evidence: dict[str, int]   # field name -> page number
+Validation rules: the objects must add up (within rounding) to the fresh-issue amount less issue expenses; any field that fails verification is returned as null with a reason, never guessed.
+2.6 GraphRAG layer (core component)
+Prospectuses are full of relationships: promoters who are directors of group companies, subsidiaries that receive IPO money, litigation that names several people, and related-party transactions between connected entities. Plain chunk retrieval struggles when an answer needs facts from several sections. The graph layer handles these questions, and you prove its value with a separate set of multi-hop eval questions.
+Example questions the graph answers: 
+Which promoters are also directors of group companies that have related-party transactions with the issuer?
+Which subsidiaries receive money from the proceeds, and what litigation involves them?
+Which individuals appear in both pending litigation and the promoter group?
+Item
+Specification
+Nodes
+Company, Promoter, Director, KeyManagerialPerson, Subsidiary, GroupCompany, SellingShareholder, LeadManager, Litigation, RelatedPartyTransaction, ObjectOfIssue. Every node stores a name, type, source page and source chunk id.
+Edges
+PROMOTES, DIRECTOR_OF, SUBSIDIARY_OF, GROUP_COMPANY_OF, PARTY_TO, SELLS_SHARES, FUNDS, TRANSACTS_WITH (with amount and year as properties). Every edge stores its source page.
+Extraction
+Run an LLM with a fixed JSON schema over only the relevant sections. Validate the output with Pydantic, reject unknown labels, and spot-check 10% manually.
+Entity resolution
+Normalise names (case, punctuation, Pvt/Private, Ltd/Limited), fuzzy match with rapidfuzz, and use an LLM only for ambiguous pairs. Store the aliases on the node.
+Loading
+Use MERGE statements through the Neo4j Python driver so re-ingestion does not create duplicates; tag everything with ipo_id so IPOs stay separate.
+Query path 1: template Cypher
+A small library of parameterised Cypher queries for common relationship questions (safest and fastest).
+Query path 2: generated Cypher
+For other questions the LLM writes Cypher from the graph schema; run it with a read-only database user, validate it (no writes, row limit, timeout), and fall back to vector RAG if it fails.
+Query path 3: graph-augmented retrieval
+Detect entities in the question, traverse one to two hops from them, collect the linked source chunks, and add those chunks to the vector results before reranking.
+Router rule
+Send a question to the graph path only when it mentions entity relationships or needs facts from several sections; keep ordinary lookups on vector search.
+Explainability
+Return the graph path (entities and edges used) plus the cited pages so users can verify the answer.
+Framework notes
+Custom extraction plus Neo4j gives the most control and the best interview story. LangChain's LLMGraphTransformer, LlamaIndex PropertyGraphIndex, Microsoft GraphRAG and LightRAG are alternatives to compare or borrow ideas from.
+Test whether it helps: write 15 to 20 multi-hop questions, run plain RAG and RAG plus graph, and chart both (Figure 3 shows the layout). Keep the graph path only for question types where it measurably improves accuracy.
+2.7 FastAPI endpoints (Phase 1)
+Method
+Endpoint
+Purpose
+POST
+/ipos
+Register an IPO and upload its DRHP/RHP; starts a background ingestion job.
+GET
+/ipos/{ipo_id}
+IPO details and ingestion status.
+POST
+/ipos/{ipo_id}/ask
+Ask a question; returns answer, citations, flags, disclaimer.
+GET
+/ipos/{ipo_id}/summary
+Structured summary card with evidence pages.
+GET
+/ipos/{ipo_id}/proceeds
+Use-of-proceeds breakdown (objects, amounts, schedule).
+POST
+/ipos/{ipo_id}/compare
+Compare DRHP and RHP versions and list changes.
+GET
+/ipos/{ipo_id}/pages/{page}
+Return a page (text or image) for the source viewer.
+GET
+/ipos/{ipo_id}/graph
+Nodes and edges for the graph viewer, with optional entity and depth filters.
+GET
+/ipos/{ipo_id}/entities/{name}
+Entity profile: aliases, relationships and source pages.
+POST
+/ipos/{ipo_id}/graph/build
+Run or re-run graph extraction as a background job.
+GET
+/ipos/{ipo_id}/charts/proceeds
+Chart-ready data for the use-of-proceeds bar chart.
+POST
+/eval/run
+Run the eval suite and store metrics (protected).
+GET
+/health
+Service health.
+2.8 Evaluation plan (Phase 1)
+Write the eval set before building the pipeline: about 50 questions across 3 to 5 past IPOs, each with a reference answer and source page.
+Metric
+How to measure
+Retrieval recall@5 / MRR
+Is the correct page or section in the top results?
+Faithfulness
+Is every claim supported by a cited chunk? (LLM judge calibrated on 20 manually labelled answers.)
+Numeric accuracy
+Exact match on amounts, share counts, percentages, price band, lot size.
+Refusal accuracy
+10 questions with no answer in the document, and 5 asking for buy/sell advice. The system must decline correctly.
+Injection resistance
+Insert a hidden instruction into a test document; the system must ignore it.
+Multi-hop accuracy
+15 to 20 relationship questions answered by plain RAG vs RAG plus graph; also check that the returned graph path is correct.
+Embedding bake-off
+Recall@5, MRR and indexing time for bge-m3, Qwen3-Embedding-0.6B, EmbeddingGemma and a hosted embedding on the same questions.
+Latency and cost
+p50 and p95 latency, tokens and cost per query.
+Run improvements one at a time and record each in a results table: baseline, then section-aware chunking, hybrid search, reranker, table handling, query rewriting. Keep only changes that help.
+2.9 Visual outputs (charts and graphs)
+The UI and README should show results visually. Build the charts from API data (the /charts endpoints) so the same numbers appear in the app, the docs and your interview demo. The figures use made-up sample numbers purely to show the layout; replace them with real results.
+Figure 2 (bar chart): use-of-proceeds breakdown from the structured summary. Sample data.
+Figure 3 (grouped bar chart): eval results after each change, with multi-hop questions shown separately. Placeholder values.
+Chart
+Data source
+Where it appears
+Use of proceeds (bar)
+ObjectOfIssue rows from the structured summary
+IPO summary page; README
+Eval ladder (grouped bar)
+eval/results from each experiment
+README results section; interviews
+Day-wise subscription (line)
+Subscription data (Phase 2)
+Valuation and estimate page
+Listing gain by bucket (bar)
+Past-IPOs table (Phase 2)
+Estimate page
+Backtest (line with band)
+Model predictions vs actuals (Phase 2)
+Model card in README
+Entity graph
+/graph endpoint (Neo4j)
+Graph tab in the UI
+2.10 Folder structure
+ipo-analyst/
+  app/
+    main.py
+    api/            routes_ipos.py, routes_ask.py
+    core/           config.py, schemas.py, logging.py
+    ingestion/      parser.py, sections.py, tables.py, chunker.py, embed.py, indexer.py
+    retrieval/      rewrite.py, hybrid.py, rerank.py, parent_expand.py
+    generation/     prompts.py, answer.py, citations.py, groundedness.py, numeric_check.py
+    extraction/     summary_schema.py, extractor.py
+    graph/          schema.py, extract.py, resolve.py, load_neo4j.py, cypher_templates.py, graph_query.py
+    llm/            client.py, providers/ (gemini, groq, openrouter, ollama), cache.py
+    charts/         proceeds.py, subscription.py, listing.py, backtest.py
+  data/             raw_pdfs/, processed/
+  eval/             questions_phase1.jsonl, run_eval.py, results/
+  frontend/         streamlit_app.py
+  tests/
+  docker-compose.yml, Dockerfile, .env.example, README.md
+2.11 Phase 1 schedule (about 3 weeks)
+Days
+Tasks
+1-2
+Pick 3 to 5 past IPOs, download DRHP/RHP files, write the 50-question eval set plus 15 to 20 multi-hop questions.
+3-4
+Set up Docker Compose (Qdrant, Neo4j, Postgres, Redis), LLM client with provider fallback, baseline pipeline. Record baseline scores.
+5-7
+Section-aware chunking, table handling, metadata filters, hybrid search, reranker. Run the embedding bake-off. Log each change.
+8-10
+Graph schema, extraction on key sections, entity resolution, Neo4j loading, template Cypher queries and graph-augmented retrieval.
+11-13
+Structured summary extraction, numeric checks, refusal logic, groundedness check, router between vector and graph paths.
+14-16
+FastAPI endpoints, chart endpoints, Redis cache, Langfuse tracing, tests.
+17-21
+UI with source viewer, charts and graph tab; deployment; trials with 5 to 10 users; failure log and README with results tables.
+Phase 1 is done when: the eval table shows measured improvements over the baseline, the use-of-proceeds answers are numerically correct on all test IPOs, refusals work, and a public demo exists. If you stop here, you already have a strong project.
+3. Phase 2: Agent With Tools
+3.1 Goal and question set
+The agent combines document answers (Phase 1 as a tool) with deterministic calculations and data tools. Sample questions:
+At the upper price band, what are the implied market capitalisation and P/E, and how do they compare with listed peers?
+What listing-gain range did past IPOs of similar size and sector see, and how does subscription affect it?
+What is the estimated opening-price range relative to the issue price, and how uncertain is it?
+How did the market behave in the weeks before this IPO, and how did past IPOs list in similar conditions?
+Mixed: "How will the proceeds be used, and does the valuation look high compared with peers?" (document tool plus valuation tools).
+3.2 Honest note on price estimation
+Listing prices are hard to predict. With only a few hundred past IPOs and many unmeasurable factors, expect modest accuracy. The goal is not a "winning" prediction but a transparent, backtested estimate: a range with a confidence interval, compared against a naive baseline (such as the historical median listing gain). If the model does not beat the baseline, report that honestly. It is still a valid, interview-worthy result. The grey market premium (GMP) is an unofficial, unregulated indicator and can be noisy or manipulated, so treat it as an optional, clearly flagged feature and not as ground truth.
+3.3 Data required
+Dataset
+Details
+Past IPOs table
+Aim for 150 to 300 mainboard IPOs: issue price, listing-day opening price, closing price, issue size, fresh vs OFS split, sector, listing date, QIB/NII/retail subscription multiples, total subscription. Build it from official exchange and registrar data; check each source's terms before scraping and curate manually where unclear.
+Market context
+Nifty index returns before the IPO window (for example the prior 5 and 30 trading days), via an index data API or yfinance (an unofficial wrapper that can break).
+Peer data
+Peer P/E, P/B and market cap for listed companies in the same sector. Start with a hand-curated CSV for your test IPOs for reliability.
+Current IPO inputs
+Price band, issue size, subscription data (from exchange pages or manual entry), optional GMP.
+Target variable: listing gain % = (opening price minus issue price) divided by issue price. "Asked price" in the user's sense is the price band (use the upper band as the issue price for the pre-listing estimate), and "opening price" is the first traded price on listing day.
+Figure 4 (line chart): day-wise subscription multiples by investor category. Sample data.
+Figure 5 (bar chart with ranges): historical listing gain by subscription bucket. Sample data.
+3.4 Agent tools
+Tool
+Input and output
+Implementation notes
+retrieve_prospectus
+ipo_id, question -> answer with citations
+Wraps Phase 1 /ask. Used for every claim about the document.
+get_issue_details
+ipo_id -> price band, issue size, fresh/OFS, lot size
+Reads the Phase 1 structured summary (with evidence pages).
+calculator
+Expression or named formula -> number
+Deterministic Python only (implied market cap, P/E, P/B, EV/sales, percentage change). The LLM must never do arithmetic itself.
+get_peer_valuations
+sector or peer list -> P/E, P/B, market cap
+Reads the curated peer CSV; later add a market data API.
+get_market_context
+date -> index returns for prior periods
+Index data provider or yfinance, cached. Returns data with the retrieval timestamp.
+get_past_ipos
+filters (sector, size band, period) -> table and summary statistics
+Queries the past-IPOs table; returns the distribution of listing gains.
+get_subscription
+ipo_id -> category-wise subscription multiples
+From exchange data or manual input; marks whether the issue has closed.
+estimate_listing_range
+features -> median, 10th and 90th percentile gain, implied price range
+Calls the trained model (section 3.6). Always returns an interval and the baseline for comparison.
+get_gmp (optional)
+ipo_id -> indicative premium
+Off by default. If enabled, flag as unofficial and unreliable.
+3.5 Agent architecture
+Component
+Specification
+Framework
+LangGraph (graph of nodes with shared state, step limits and checkpoints). Plain Python is acceptable if you can explain every step.
+Nodes
+router -> planner -> tool_executor (loop) -> verifier -> responder.
+Router
+Classifies the request as document-only, valuation, estimate, or mixed. Document-only questions skip the agent loop and go straight to Phase 1.
+State
+ipo_id, user question, plan, tool results with timestamps, citations, step count, token and cost budget.
+Limits
+Maximum 8 steps, per-tool timeouts, token budget, repeated-call detection, graceful fallback ("partial answer, here is what I could not compute").
+Verifier
+Checks that document claims have citations, numbers come from tools, and the estimate includes an interval and disclaimer.
+LLM
+Gemini Flash-class model on the free tier for planning and tool calling, behind the same LLMClient wrapper with Groq or Ollama fallback. Keep prompts short and steps few to stay inside free quotas.
+Memory
+Conversation history per session; no long-term personal memory needed.
+Tool protocol
+Typed Pydantic schemas for tool inputs and outputs. Optional: expose the tools via an MCP server.
+3.6 Prediction model specification
+Item
+Specification
+Target
+Listing gain % at open (optionally also close).
+Features (known before listing)
+Issue size, fresh/OFS ratio, sector, QIB / NII / retail / total subscription multiples, price-band valuation vs peers (P/E ratio relative to peer median), Nifty return in prior 5 and 30 trading days, number of IPOs in the same month (market heat), optional GMP.
+Models
+Baseline: historical median. Then Ridge or Lasso regression, then gradient boosting (LightGBM or scikit-learn) with quantile objectives for the 10th, 50th and 90th percentiles. Prefer simple models given the small dataset.
+Validation
+Time-based split or walk-forward validation. Never shuffle randomly, and exclude any feature that is only known after listing (data leakage).
+Metrics
+MAE versus the baseline, directional accuracy (listed above or below issue price), interval coverage (does the 80% interval contain the outcome about 80% of the time), and error by sector.
+Explainability
+Feature importance or SHAP, shown to the user as "what drove this estimate".
+Output
+Median gain, 10th to 90th percentile range, implied opening-price range in rupees, number of comparable IPOs, and a plain-language limitation statement.
+Figure 6 (line chart): walk-forward backtest showing predicted median, 80% interval and actual outcomes. Sample data.
+3.7 Guardrails
+Refuse and redirect any request for a recommendation ("should I apply?", "will it list at a profit?"). Offer the evidence and the estimate range instead.
+Every estimate carries an interval, the baseline comparison, the data date and a disclaimer.
+All arithmetic through the calculator tool; all document claims through retrieve_prospectus with citations.
+Treat retrieved text and web data as untrusted (prompt injection); tools are read-only.
+Rate limiting, input validation, API key protection, and no personal financial data stored.
+Audit log of every tool call and final answer.
+3.8 FastAPI endpoints (Phase 2 additions)
+Method
+Endpoint
+Purpose
+POST
+/ipos/{ipo_id}/agent
+Ask a multi-step question; returns answer, citations, tool trace, disclaimer.
+GET
+/ipos/{ipo_id}/valuation
+Implied market cap, P/E and peer comparison at the price band.
+GET
+/ipos/{ipo_id}/estimate
+Listing-gain and opening-price range with interval and comparable IPOs.
+GET
+/datasets/past-ipos
+Filterable historical IPO table.
+POST
+/ipos/{ipo_id}/subscription
+Manually add or update subscription data.
+POST
+/eval/agent
+Run agent scenarios (trajectory evaluation).
+POST
+/eval/backtest
+Run the model backtest and store metrics.
+3.9 Evaluation plan (Phase 2)
+Area
+How to measure
+Tool selection accuracy
+40 to 50 scenarios with the expected tools; measure the percentage where the agent called the right tools.
+Task success
+Share of scenarios with a fully correct final answer; run each scenario 3 times to measure variability.
+Calculator correctness
+Unit tests for every formula against hand-checked values.
+Model backtest
+MAE versus baseline, directional accuracy, interval coverage on held-out recent IPOs.
+Guardrails
+Advice requests refused, injection attempts blocked, estimates always include an interval.
+Cost and latency
+Steps per query, tokens, cost and p95 latency; cache hit rate.
+3.10 Folder additions
+  app/
+    api/            routes_agent.py, routes_valuation.py, routes_estimate.py
+    tools/          retrieve_tool.py, issue_details.py, calculator.py, peers.py,
+                    market_data.py, past_ipos.py, subscription.py, estimate.py
+    agent/          state.py, graph.py, router.py, planner.py, verifier.py, guardrails.py
+    models/         features.py, train.py, predict.py, backtest.py
+  data/             past_ipos.csv, peers.csv, market/
+  eval/             questions_phase2.jsonl, scenarios.jsonl, backtest.py
+3.11 Phase 2 schedule (about 3 weeks)
+Days
+Tasks
+1-5
+Build and clean the past-IPOs dataset (the slowest step), peer CSV and market data fetch with caching.
+6-8
+Calculator tool with unit tests; valuation endpoint; wrap Phase 1 as retrieve_prospectus.
+9-12
+Feature engineering, baseline and models, walk-forward backtest, interval calibration.
+13-16
+Agent graph with router, planner, verifier, limits and tracing; scenario test set.
+17-19
+Guardrail tests, UI updates (tool trace panel, estimate chart), deployment.
+20-21
+Trials with users, failure log, README with results, optional MCP server.
+4. Cross-Cutting Requirements
+Area
+Specification
+Security
+API keys in environment variables, request validation, rate limiting, CORS restricted, no secrets in the repo, uploads limited by type and size.
+Testing
+pytest for parsers, calculators and API routes; eval suite run in CI on every change (GitHub Actions).
+Deployment
+Docker images; deploy the API and UI to a free or low-cost platform (Render, Railway or Fly.io) with a managed Postgres; keep a demo IPO preloaded.
+Observability
+Langfuse traces, structured logs, dashboard for latency, cost, failure rate and refusal rate.
+Versioning
+Version prompts, embedding models and datasets; store the version with every eval run so results are reproducible.
+Cost control
+Cache answers and embeddings, cap context size, use a smaller model for classification and routing.
+Free-tier operations
+Handle 429 errors with backoff and provider fallback, cache LLM and embedding calls, track daily quota use, send a heartbeat write to Neo4j AuraDB Free every 2 days, and keep exports of the graph and vector index.
+Documentation
+README with architecture diagram, setup steps, eval results tables, limitations and disclaimer.
+5. Risks and Mitigations
+Risk
+Mitigation
+Wrong numbers extracted from tables
+Table-aware parsing, exact-match checks, show source page next to every figure.
+Appearing to give investment advice
+Refusal logic, disclaimer, no buy/sell wording, non-commercial use, check SEBI rules.
+Small dataset, overfitting
+Simple models, walk-forward validation, always compare with the baseline and report honestly.
+Data leakage in the price model
+Only use features available before listing; review every feature with this rule.
+Unreliable external data (GMP, unofficial APIs)
+Optional and flagged; cache; manual CSV fallback.
+Free-tier limits or policy changes
+Provider wrapper with fallbacks, local Ollama models for bulk jobs, cached results, and config-driven model names.
+Graph extraction errors (wrong or duplicate entities)
+Fixed schema, entity resolution, source page on every edge, manual spot checks, and fall back to vector RAG when the graph path fails.
+Scope creep
+Finish Phase 1 (including the graph layer) before starting Phase 2, and keep the graph path only for question types where evals show it helps.
+Scraping terms of service
+Download a limited set manually or use official data; respect each site's terms.
+6. Resume, Story and Interview Preparation
+6.1 Resume bullets (fill with your measured numbers)
+Built an IPO prospectus analysis assistant (FastAPI, Qdrant, hybrid search + cross-encoder reranker) over X DRHP/RHP filings; table-aware parsing and exact-match checks raised key-figure accuracy from __% to __%; evaluated on 50 questions (recall@5 __%, faithfulness __%).
+Added a GraphRAG layer (Neo4j, LLM entity extraction with entity resolution, template and guarded Cypher) that raised multi-hop question accuracy from __% to __% over plain RAG; selected the embedding model (bge-m3 vs Qwen3-Embedding vs EmbeddingGemma) through a benchmark on my own eval set.
+Extended it into a tool-using agent (LangGraph) with a deterministic valuation calculator, peer and market-data tools, and a quantile-regression listing-range estimator backtested on __ IPOs (MAE __ vs __ baseline; 80% interval coverage __%).
+Enforced citations, advice refusal, step and cost limits, and prompt-injection tests; traced end to end with Langfuse and deployed with Docker.
+6.2 Story structure (use only what is true)
+Trigger (a real IPO you or friends considered), problem (hundreds of pages, social media tips instead of the document), what you built, what broke (for example a misread table or a wrong share count) and how you fixed it, what you measured, and what you would improve. If the price model did not beat the baseline, say so and explain what you learned. Interviewers respect honest results.
+6.3 Likely interview questions on this project
+How did you parse tables, and how do you guarantee the numbers in answers are correct?
+Why hybrid search and a reranker? Show the numbers from your results table.
+Why did or didn't you use GraphRAG? What evidence did you use to decide?
+How do you prevent the system from giving investment advice?
+Why use a calculator tool instead of letting the LLM do the maths?
+How did you avoid data leakage in the price model, and how did you validate it?
+What happens when the agent loops, a tool fails or the data is stale?
+How would you scale this to 1,000 IPOs and many concurrent users?
+Why did you choose that embedding model? What did your bake-off show, and why do prefixes and normalisation matter?
+How do you handle free-tier rate limits and provider outages?
+How do you build and validate the knowledge graph? How do you stop wrong Cypher from running?
+Qdrant vs pgvector, and Neo4j vs a relational schema: when would each be enough?
+Why Gemini for generation and a different model family for judging?

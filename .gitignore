@@ -1,0 +1,18 @@
+# Secrets & Environment
+.env
+
+# Python cache & virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local data & storage (exclude heavy PDFs and local DB storage from git)
+data/raw_pdfs/*.pdf
+data/cache/
+data/qdrant_storage/
+data/processed/
+
+# IDE files
+.vscode/
+.idea/
