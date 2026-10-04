@@ -177,7 +177,7 @@ def upload_and_process_prospectus(file: UploadFile = File(...)) -> UploadRespons
         chunker = HierarchicalChunker()
         retrieval_chunks, parent_chunks = chunker.chunk_document(
             parser=parser,
-            detector=detector,
+            section_detector=detector,
             ipo_id=ipo_id,
             doc_metadata=meta,
         )
@@ -312,7 +312,7 @@ def index_cached_prospectus(ipo_id: str) -> Dict[str, Any]:
 
     retrieval_chunks, _ = chunker.chunk_document(
         parser=parser,
-        detector=detector,
+        section_detector=detector,
         ipo_id=ipo_id,
         doc_metadata=meta,
     )

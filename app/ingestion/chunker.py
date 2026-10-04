@@ -129,9 +129,11 @@ class HierarchicalChunker:
     def chunk_document(
         self,
         parser: PDFParser,
-        section_detector: SectionDetector,
-        ipo_id: str,
+        section_detector: Optional[SectionDetector] = None,
+        ipo_id: str = "",
         doc_metadata: Optional[DocumentMetadata] = None,
+        detector: Optional[SectionDetector] = None,
+        **kwargs,
     ) -> Tuple[List[DocumentChunk], List[DocumentChunk]]:
         """
         Process a complete prospectus document.
@@ -140,12 +142,16 @@ class HierarchicalChunker:
             - retrieval_chunks: child_text chunks and whole table chunks (for Qdrant embedding)
             - parent_context_chunks: parent_section chunks (for expanding context during generation)
         """
+        sec_detector = section_detector or detector
+        if sec_detector is None:
+            sec_detector = SectionDetector(parser)
+
         meta = doc_metadata or parser.extract_document_metadata()
         company_name = meta.company_name or ipo_id
         doc_type = meta.doc_type
         doc_version = meta.filing_date or "latest"
 
-        boundaries = section_detector.detect_sections()
+        boundaries = sec_detector.detect_sections()
         doc = parser.open()
 
         retrieval_chunks: List[DocumentChunk] = []
