@@ -447,4 +447,71 @@ In professional software development, **unit tests must never make live calls to
    - **Testing Key Hashing**: Verified that identical prompts and temperatures produce deterministic SHA-256 cache fingerprints.
    - **Testing Config**: Verified that Pydantic `BaseSettings` automatically initialized the project folder structure.
 
+---
+
+### Doubt 18: Frontend Deployment Preparation & 100% Free Production Architecture
+
+#### 1. Why Did We Make Those Small Code Changes?
+Your backend and RAG pipeline logic was not touched or modified. We only made 4 files cloud-ready for one specific reason:
+
+- **The Problem with Hardcoded `localhost:8000`**:
+  In `GraphTab.jsx`, `UploadModal.jsx`, `App.jsx`, and `ChatTab.jsx`, API calls were directly written as:
+  ```javascript
+  fetch("http://localhost:8000/api/v1/...")
+  ```
+  On your laptop, that works because the backend is running on your machine. But as soon as you deploy the frontend to the web (e.g. `your-app.vercel.app`), anyone visiting that site will have their browser look for `localhost:8000` on their personal device, causing immediate Connection Failed errors.
+
+- **The Fix (`config.js`)**: We added a standard dynamic base URL:
+  ```javascript
+  export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+  ```
+  - **When running on your laptop**: It automatically defaults to `http://localhost:8000` (zero difference, nothing breaks).
+  - **When deployed to the cloud**: You simply set `VITE_API_BASE_URL=https://your-backend.com` in your dashboard, and it connects smoothly.
+
+#### 2. Best 100% Free Deployment Options
+For a full-stack AI application combining FastAPI + Vector Search (Qdrant) + Knowledge Graph (Neo4j) + React, here are the best free-tier platforms:
+
+```
+┌────────────────────────────────────────────────────────┐
+│             FRONTEND (React + Vite)                    │
+│      Vercel / Cloudflare Pages (100% Free Forever)     │
+└──────────────────────────┬─────────────────────────────┘
+                           │ HTTPS API Calls
+┌──────────────────────────▼─────────────────────────────┐
+│                 BACKEND (FastAPI API)                  │
+│  ⭐ Hugging Face Spaces (16GB RAM Free) OR Render Free │
+└─────────────┬────────────────────────────┬─────────────┘
+              │                            │
+┌─────────────▼──────────────┐ ┌───────────▼─────────────┐
+│    Qdrant Cloud Free       │ │   Neo4j AuraDB Free     │
+│ (1 GB Free Vector Cluster) │ │ (1 Instance Free/Cloud) │
+└────────────────────────────┘ └─────────────────────────┘
+```
+
+##### Option 1: Hugging Face Spaces (Backend) + Vercel (Frontend) — ⭐ Top Recommendation
+| Component | Platform | Free Specs | Cost |
+| :--- | :--- | :--- | :--- |
+| **Backend** | **Hugging Face Spaces (Docker)** | **16 GB RAM + 2 vCPU** | **$0 (Free Forever)** |
+| **Frontend** | **Vercel** | Global Edge CDN, HTTPS, Unlimited Bandwidth | **$0 (Free Forever)** |
+
+**Why this is the best for your project:**
+- Most free backend providers (Render, Koyeb) only give 512 MB RAM. Running `fastembed` (ONNX embeddings) on a 500-page prospectus like Hero Motors can cause out-of-memory crashes on 512 MB.
+- Hugging Face gives **16 GB RAM for free** on their Docker Spaces, specifically built for AI/ML and RAG APIs.
+
+##### Option 2: Render (Backend) + Vercel (Frontend)
+| Component | Platform | Free Specs | Limitations |
+| :--- | :--- | :--- | :--- |
+| **Backend** | **Render.com (Web Service)** | 512 MB RAM, 0.1 CPU | Spins down after 15 min of inactivity (takes ~40s cold start to wake up). |
+| **Frontend** | **Vercel** | Unlimited static hosting | None. |
+
+If you commit the already processed files in `data/processed/` (`hero-motors_summary.json`, `zomato_summary.json`, etc.), queries on already indexed IPOs will work with low memory usage.
+
+##### Option 3: Free Cloud Databases (To persist data across server restarts)
+| Service | Free Tier | What It Stores in Your Project |
+| :--- | :--- | :--- |
+| **Qdrant Cloud** | 1 GB free cluster forever (No credit card) | Vector embeddings for hybrid search (`EMBEDDING_MODEL_NAME`). |
+| **Neo4j AuraDB** | 1 free cloud database instance (up to 200k nodes) | Corporate relationships, promoter links, litigation network. |
+| **Local File Fallback** | Included | If you don't want external databases, your code already supports local JSON graphs (`*_graph.json`) and embedded Qdrant files. |
+
+
 
