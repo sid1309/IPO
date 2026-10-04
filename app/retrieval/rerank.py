@@ -19,9 +19,30 @@ class RerankedChunk:
 
 
 class CrossEncoderReranker:
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3", top_n: int = 5):
-        self.model = TextCrossEncoder(model_name=model_name)
+    def __init__(self, model_name: Optional[str] = None, top_n: int = 5):
         self.top_n = top_n
+        self.model = None
+
+        if not model_name:
+            try:
+                from app.core.config import settings
+                model_name = getattr(settings, "RERANKER_MODEL_NAME", "Xenova/ms-marco-MiniLM-L-6-v2")
+            except Exception:
+                model_name = "Xenova/ms-marco-MiniLM-L-6-v2"
+
+        # Map unsupported names to FastEmbed supported models
+        # Xenova/ms-marco-MiniLM-L-6-v2 is ultra-lightweight (80MB) and fits inside free cloud tiers (512MB RAM)
+        target_model = model_name
+        if "v2-m3" in str(model_name):
+            target_model = "Xenova/ms-marco-MiniLM-L-6-v2"
+
+        for candidate in [target_model, "Xenova/ms-marco-MiniLM-L-6-v2"]:
+            try:
+                self.model = TextCrossEncoder(model_name=candidate)
+                break
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Could not load reranker '{candidate}': {e}")
 
     def rerank(
         self,
@@ -42,7 +63,15 @@ class CrossEncoderReranker:
                 doc_text = payload.get("text", "")
             documents.append(doc_text)
 
-        scores = list(self.model.rerank(query, documents))
+        if self.model is not None:
+            try:
+                scores = list(self.model.rerank(query, documents))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Reranking error, using candidate scores: {e}")
+                scores = [getattr(pt, "score", 1.0) for pt in candidate_points]
+        else:
+            scores = [getattr(pt, "score", 1.0) for pt in candidate_points]
 
         scored_chunks = []
         for pt, score in zip(candidate_points, scores):
@@ -51,7 +80,7 @@ class CrossEncoderReranker:
                 RerankedChunk(
                     chunk_id=str(getattr(pt, "id", "")),
                     text=payload.get("text", ""),
-                    relevance_score=float(score),
+                    relevance_score=float(score) if score is not None else 0.0,
                     section=payload.get("section", "general"),
                     page_start=payload.get("page_start", 1),
                     page_end=payload.get("page_end", 1),

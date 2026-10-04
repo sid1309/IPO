@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # Embedding & Reranker
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
-    RERANKER_MODEL_NAME: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_MODEL_NAME: str = "Xenova/ms-marco-MiniLM-L-6-v2"
 
     # Vector Storage (Qdrant)
     # If QDRANT_URL is empty, embedded mode (local directory) is used
