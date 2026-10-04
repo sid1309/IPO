@@ -13,6 +13,7 @@ import SummaryTab from './components/SummaryTab';
 import ChatTab from './components/ChatTab';
 import GraphTab from './components/GraphTab';
 import UploadModal from './components/UploadModal';
+import { API_BASE_URL } from './config';
 
 export default function App() {
   const [ipos, setIpos] = useState([]);
@@ -27,7 +28,7 @@ export default function App() {
   // 1. Fetch available IPOs
   const fetchIpos = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/ipos');
+      const res = await fetch(`${API_BASE_URL}/api/v1/ipos`);
       if (res.ok) {
         const data = await res.json();
         setIpos(data);
@@ -52,7 +53,7 @@ export default function App() {
     async function loadSummary() {
       setLoadingSummary(true);
       try {
-        const res = await fetch(`http://localhost:8000/api/v1/summary/${activeIpoId}`);
+        const res = await fetch(`${API_BASE_URL}/api/v1/summary/${activeIpoId}`);
         if (res.ok) {
           const data = await res.json();
           setSummaryData(data);

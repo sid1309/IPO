@@ -10,6 +10,7 @@ import {
   Loader2,
   CheckCircle2,
 } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 // Helper component to cleanly render formatted markdown without exposing raw asterisks (**)
 function FormattedMessage({ content }) {
@@ -166,7 +167,7 @@ export default function ChatTab({ ipoId, companyName }) {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/v1/query', {
+      const res = await fetch(`${API_BASE_URL}/api/v1/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ipo_id: ipoId, question: q }),
@@ -194,7 +195,7 @@ export default function ChatTab({ ipoId, companyName }) {
         ...prev,
         {
           role: 'assistant',
-          content: '⚠️ Failed to connect to the backend server. Please verify that the API is running at localhost:8000.',
+          content: `⚠️ Failed to connect to the backend server. Please verify that the API is running at ${API_BASE_URL}.`,
         },
       ]);
     } finally {

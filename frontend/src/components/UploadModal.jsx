@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, CheckCircle2, Loader2, X, FileText, AlertCircle, Clock } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function UploadModal({ isOpen, onClose, onUploadComplete }) {
   const [file, setFile] = useState(null);
@@ -89,7 +90,7 @@ export default function UploadModal({ isOpen, onClose, onUploadComplete }) {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('http://localhost:8000/api/v1/upload', {
+      const res = await fetch(`${API_BASE_URL}/api/v1/upload`, {
         method: 'POST',
         body: formData,
       });

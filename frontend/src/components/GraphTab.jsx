@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Network, AlertOctagon, Users, ArrowRight, BookOpen, Building2, Gavel } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function GraphTab({ ipoId, companyName }) {
   const [graphData, setGraphData] = useState(null);
@@ -10,7 +11,7 @@ export default function GraphTab({ ipoId, companyName }) {
       if (!ipoId) return;
       setLoading(true);
       try {
-        const res = await fetch(`http://localhost:8000/api/v1/graph/${ipoId}`);
+        const res = await fetch(`${API_BASE_URL}/api/v1/graph/${ipoId}`);
         if (res.ok) {
           const data = await res.json();
           setGraphData(data);
