@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = Field(default="", description="Groq Cloud API Key")
 
     # LLM Model Names
-    PRIMARY_LLM_MODEL: str = "gemini-3.8-flash"
-    ROUTER_LLM_MODEL: str = "gemini-3.8-flash-lite"
-    FALLBACK_LLM_MODEL: str = "qwen/qwen3.8-27b"
-    EVAL_JUDGE_MODEL: str = "qwen/qwen3.8-27b"
+    PRIMARY_LLM_MODEL: str = "gemini-1.5-flash"
+    ROUTER_LLM_MODEL: str = "gemini-1.5-flash"
+    FALLBACK_LLM_MODEL: str = "llama-3.3-70b-versatile"
+    EVAL_JUDGE_MODEL: str = "llama-3.3-70b-versatile"
 
     # Embedding & Reranker
     EMBEDDING_PROVIDER: str = "gemini"  # "gemini" (cloud API - 0 RAM) or "local" (FastEmbed ONNX)

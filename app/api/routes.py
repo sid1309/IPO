@@ -248,13 +248,30 @@ def query_prospectus(req: QueryRequest) -> QueryResponse:
     context_mgr = ParentContextManager()
     context = context_mgr.assemble_context(reranked_chunks=reranked)
 
-    result = answer_generator.generate_answer(
-        question=question,
-        context=context,
-        company_name=req.ipo_id.replace("-", " ").title(),
-        doc_type="RHP",
-        use_cache=True,
-    )
+    try:
+        result = answer_generator.generate_answer(
+            question=question,
+            context=context,
+            company_name=req.ipo_id.replace("-", " ").title(),
+            doc_type="RHP",
+            use_cache=True,
+        )
+    except Exception as e:
+        logger.error(f"Answer generation error for IPO '{req.ipo_id}': {e}")
+        return QueryResponse(
+            question=question,
+            answer=f"⚠️ An error occurred while generating the answer: {e}. Please ensure your API keys (GEMINI_API_KEY / GROQ_API_KEY) are active.",
+            is_refusal=True,
+            is_advice_refusal=False,
+            is_listing_analysis=False,
+            cited_pages=[],
+            sections_covered=[],
+            citations=[],
+            numeric_precision=0.0,
+            all_numbers_verified=False,
+            unverified_numbers_count=0,
+            disclaimer=SEBI_DISCLAIMER,
+        )
 
     seen_citations = set()
     citation_items = []

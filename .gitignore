@@ -22,3 +22,7 @@ frontend/dist/
 # IDE files
 .vscode/
 .idea/
+
+# Internal Interview & Preparation Notes (Local Only)
+INTERVIEW_PREP_DECISIONS.md
+extracted_spec.txt
