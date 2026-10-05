@@ -29,7 +29,9 @@ class Settings(BaseSettings):
     EVAL_JUDGE_MODEL: str = "qwen/qwen3.8-27b"
 
     # Embedding & Reranker
-    EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
+    EMBEDDING_PROVIDER: str = "gemini"  # "gemini" (cloud API - 0 RAM) or "local" (FastEmbed ONNX)
+    EMBEDDING_MODEL_NAME: str = "gemini-embedding-001"
+    EMBEDDING_DIMENSION: int = 768
     RERANKER_MODEL_NAME: str = "Xenova/ms-marco-MiniLM-L-6-v2"
 
     # Vector Storage (Qdrant)

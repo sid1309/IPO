@@ -48,6 +48,19 @@ class QdrantIndexer:
         collections = self.client.get_collections().collections
         exists = any(c.name == COLLECTION_NAME for c in collections)
 
+        if exists:
+            try:
+                coll_info = self.client.get_collection(COLLECTION_NAME)
+                vectors_cfg = coll_info.config.params.vectors
+                dense_cfg = vectors_cfg.get(DENSE_VECTOR_NAME) if isinstance(vectors_cfg, dict) else vectors_cfg
+                current_size = getattr(dense_cfg, "size", None)
+                if current_size is not None and current_size != self.embedder.dense_dimension:
+                    logger.info(f"Vector size changed ({current_size} -> {self.embedder.dense_dimension}). Re-creating collection '{COLLECTION_NAME}'...")
+                    self.client.delete_collection(COLLECTION_NAME)
+                    exists = False
+            except Exception as e:
+                logger.warning(f"Could not verify existing collection vector dimension: {e}")
+
         if not exists:
             logger.info(f"Creating Qdrant hybrid collection '{COLLECTION_NAME}'...")
             self.client.create_collection(
@@ -120,8 +133,14 @@ class QdrantIndexer:
                     "table_summary": chunk.table_summary,
                 }
 
+                import uuid
+                try:
+                    point_id = str(uuid.UUID(chunk.chunk_id))
+                except Exception:
+                    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk.chunk_id))
+
                 point = models.PointStruct(
-                    id=chunk.chunk_id,
+                    id=point_id,
                     vector={
                         DENSE_VECTOR_NAME: emb.dense_vector,
                         SPARSE_VECTOR_NAME: models.SparseVector(
